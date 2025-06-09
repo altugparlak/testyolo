@@ -5,13 +5,21 @@ from math import tan, radians, cos, pi
 import csv
 import os
 from scipy.spatial.transform import Rotation as R
+from extract_gps import get_lat_lon, get_exif_data
 
 # === SETTINGS ===
-image_path = "photo/photo2.jpg"
+image_path = "photo_real/IMG_0125.jpg"
 output_dir = "output_tiles"
-drone_lat = 41.1953210
-drone_lon = 29.2436957
-altitude = 15.0  # in meters
+
+# Extract GPS from image EXIF
+exif_data = get_exif_data(image_path)
+if exif_data:
+    drone_lat, drone_lon = get_lat_lon(exif_data)
+else:
+    print("No GPS data found in EXIF. Using default coordinates.")
+#drone_lat = 41.1953210
+#drone_lon = 29.2436957
+altitude = 20.0  # in meters
 yaw_deg = 0.0   # direction camera is facing (0 = North, 90 = East)
 
 hfov_deg = 78
