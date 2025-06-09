@@ -6,17 +6,32 @@ import csv
 import os
 from scipy.spatial.transform import Rotation as R
 from extract_gps import get_lat_lon, get_exif_data
+import glob
 
+CLASS_NAMES = {
+    "person",
+    "car",
+    "motorcycle",
+    "airplane",
+    "bus",
+    "boat",
+    "stop sign",
+    "snowboard",
+    "umbrella",
+    "sports ball",
+    "baseball bat",
+    "bed",
+    "tennis racket",
+    "suitcase",
+    "skis",
+}
+
+CONF = 0.5
+IOU = 0.5
 # === SETTINGS ===
-image_path = "photo_real/IMG_0125.jpg"
+image_paths = sorted(glob.glob("photo_real/IMG_*.jpg"))
 output_dir = "output_tiles"
 
-# Extract GPS from image EXIF
-exif_data = get_exif_data(image_path)
-if exif_data:
-    drone_lat, drone_lon = get_lat_lon(exif_data)
-else:
-    print("No GPS data found in EXIF. Using default coordinates.")
 #drone_lat = 41.1953210
 #drone_lon = 29.2436957
 altitude = 20.0  # in meters
@@ -74,65 +89,81 @@ def pixel_to_gps(x, y, x_offset, y_offset, image_width, image_height, yaw_deg, p
 
     return drone_lat + dlat, drone_lon + dlon
 
-# === LOAD IMAGE ===
-full_image = cv2.imread(image_path)
-img_height, img_width = full_image.shape[:2]
-tile_w = img_width // cols
-tile_h = img_height // rows
-
 # === LOAD YOLO MODEL ===
 model = YOLO("yolo11x.pt")  # Replace with your model if needed
 
 # === OUTPUT CSV ===
-csv_file = open("detections.csv", mode="w", newline="")
+csv_file_exists = os.path.isfile("detections.csv")
+csv_file = open("detections.csv", mode="a", newline="")
 csv_writer = csv.writer(csv_file)
-csv_writer.writerow(["Class", "Confidence", "Latitude", "Longitude", "TileRow", "TileCol"])
 
-# === PROCESS TILES ===
-for row in range(rows):
-    for col in range(cols):
-        x_start = col * tile_w
-        y_start = row * tile_h
-        tile = full_image[y_start:y_start+tile_h, x_start:x_start+tile_w]
+# Only write header if file is new/empty
+if not csv_file_exists or os.path.getsize("detections.csv") == 0:
+    csv_writer.writerow(["Class", "Confidence", "Latitude", "Longitude", "TileRow", "TileCol"])
 
-        results = model(tile, conf=0.5, iou=0.5, verbose=False)
-        boxes = results[0].boxes
-        names = model.names
+for image_path in image_paths:
+    print(f"Processing {image_path}...")
 
-        annotated = tile.copy()
+    # Extract GPS from image EXIF
+    exif_data = get_exif_data(image_path)
+    if exif_data:
+        drone_lat, drone_lon = get_lat_lon(exif_data)
+    else:
+        print(f"No GPS data found in EXIF for {image_path}. Skipping.")
+        continue  # Skip image if no GPS available
 
-        for i in range(len(boxes.cls)):
-            cls_id = int(boxes.cls[i])
-            cls_name = names[cls_id]
-            conf = boxes.conf[i].item()
-            x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy().astype(int)
+    # === LOAD IMAGE ===
+    full_image = cv2.imread(image_path)
+    img_height, img_width = full_image.shape[:2]
+    tile_w = img_width // cols
+    tile_h = img_height // rows
 
-            # Center of bounding box in tile
-            cx = (x1 + x2) // 2
-            cy = (y1 + y2) // 2
+    # === PROCESS TILES ===
+    for row in range(rows):
+        for col in range(cols):
+            x_start = col * tile_w
+            y_start = row * tile_h
+            tile = full_image[y_start:y_start+tile_h, x_start:x_start+tile_w]
 
-            # Calculate GPS from full image coordinates
-            yaw_rad = radians(yaw_deg)
-            lat, lon = pixel_to_gps(
-                cx, cy, 
-                x_offset=x_start, 
-                y_offset=y_start, 
-                image_width=img_width,
-                image_height=img_height,
-                yaw_deg=yaw_deg,
-                pitch_deg=0.0,  # or actual pitch
-                roll_deg=0.0    # or actual roll
-            )
+            results = model(tile, conf=CONF, iou=IOU, verbose=False)
+            boxes = results[0].boxes
+            names = model.names
 
-            # Annotate
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(annotated, f"{cls_name} {conf:.2f}", (x1, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            annotated = tile.copy()
 
-            # Save to CSV
-            csv_writer.writerow([cls_name, f"{conf:.2f}", lat, lon, row, col])
+            for i in range(len(boxes.cls)):
+                cls_id = int(boxes.cls[i])
+                cls_name = names[cls_id]
+                if cls_name not in CLASS_NAMES:
+                    continue
+                conf = boxes.conf[i].item()
+                x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy().astype(int)
 
-        cv2.imwrite(f"{output_dir}/tile_{row}_{col}.jpg", annotated)
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+
+                lat, lon = pixel_to_gps(
+                    cx, cy, 
+                    x_offset=x_start, 
+                    y_offset=y_start, 
+                    image_width=img_width,
+                    image_height=img_height,
+                    yaw_deg=yaw_deg,
+                    pitch_deg=0.0,
+                    roll_deg=0.0
+                )
+
+                # Save to CSV
+                csv_writer.writerow([cls_name, f"{conf:.2f}", lat, lon, row, col])
+
+                # Annotate
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated, f"{cls_name} {conf:.2f}", (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+            # Save annotated tile
+            output_name = os.path.splitext(os.path.basename(image_path))[0]
+            #cv2.imwrite(f"{output_dir}/{output_name}_tile_{row}_{col}.jpg", annotated)
 
 csv_file.close()
 print("Processing completed. Detections saved.")

@@ -1,2 +1,4 @@
 photo_real/
 __pycache__/
+*.pt
+detections.csv
