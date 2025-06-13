@@ -90,7 +90,7 @@ def pixel_to_gps(x, y, x_offset, y_offset, image_width, image_height, yaw_deg, p
     return drone_lat + dlat, drone_lon + dlon
 
 # === LOAD YOLO MODEL ===
-model = YOLO("yolo11x.pt")  # Replace with your model if needed
+model = YOLO("yolo11x.pt")
 
 # === OUTPUT CSV ===
 csv_file_exists = os.path.isfile("detections.csv")
@@ -134,8 +134,8 @@ for image_path in image_paths:
             for i in range(len(boxes.cls)):
                 cls_id = int(boxes.cls[i])
                 cls_name = names[cls_id]
-                if cls_name not in CLASS_NAMES:
-                    continue
+                #if cls_name not in CLASS_NAMES:
+                 #   continue
                 conf = boxes.conf[i].item()
                 x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy().astype(int)
 
